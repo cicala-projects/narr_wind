@@ -13,6 +13,15 @@ from multiprocessing import Pool
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
 
+
+def datetime_range(start, end, delta):
+    current = start
+    if not isinstance(delta, timedelta):
+        delta = timedelta(**delta)
+    while current < end:
+        yield current
+        current += delta
+
 def retrieve_year(start_year, 
                   end_year,
                   save_path):
@@ -34,21 +43,23 @@ def retrieve_year(start_year,
         response = ftp.login()
         if response == '230 Anonymous access granted, restrictions apply':
             for i in year_month:
-                print(i)
+            print(f'Starting year/month: {i}')
                 try:
                     ftp.cwd(f'NARR/{i}')
-                    print(ftp.pwd())
                     dirnames = ftp.nlst()
                     for day in dirnames:
                         ftp.cwd(f'{day}')
                         grb_files = [f for f in ftp.nlst() if '.grb' in f]
 
                         for grb in grb_files:
-                            print(grb)
-                            path = os.path.join(save_path, grb)
-                            print(f'This is the path: {path}\n')
+                            path = os.path.join(save_path, i, day)
 
-                            with open(path, 'wb') as file_grb:
+                            if os.path.exists(path):
+                                logger.info('Directory exists! Skip dir creation')
+                            else:
+                                os.makedirs(path)
+
+                            with open(os.path.join(path, grb), 'wb') as file_grb:
                                 ftp.retrbinary(f'RETR {grb}', file_grb.write)
                         ftp.cwd('..')
                     ftp.cwd('../..')
