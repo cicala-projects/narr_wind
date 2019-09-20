@@ -1,0 +1,14 @@
+version: "3"
+services:
+    degrib:
+        container_name: degrib
+        image: degrib_transfromer/degrib
+        stdin_open: true
+        tty: true
+        build:
+            context: .
+        volumes:
+            - "../data:/tmp/data_degrib"
+        environment:
+            PATH: "/opt/degrib/bin/:${PATH}"
+

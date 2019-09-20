@@ -4,7 +4,8 @@ RUN apt-get -y update && \
     apt-get -y install gcc git wget build-essential \
     libx11-dev libssl-dev \
     openssl libssl-dev libcurl4-openssl-dev \
-    libcurl4-openssl-dev pkg-config
+    libcurl4-openssl-dev pkg-config \
+    parallel
 
 # Get library requirements to compile (Tcl and Tk)
 RUN echo "Building degrib GUI requirements and prepare for build" && \

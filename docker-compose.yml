@@ -1,9 +1,0 @@
-version: "3"
-services:
-    degrib:
-        build:
-            context: .
-        volumes:
-            - "./data:/tmp/data_degrib"
-        environment:
-            PATH: "/opt/degrib/bin/:${PATH}"
