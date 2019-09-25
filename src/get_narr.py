@@ -2,11 +2,14 @@
 Retrieve and store NARR files from the NOAA FTP server
 """
 
+
 import os
 import docker
 import logging
+import requests
+import asyncio
+from aiohttp import ClientSession
 from itertools import product
-from ftplib import FTP, all_errors
 from functools import partial
 from multiprocessing import Pool
 from datetime import datetime, timedelta
@@ -32,6 +35,78 @@ def datetime_range(start, end, delta):
     while current < end:
         yield current
         current += delta
+
+
+async def retrieve_day_async(start_month_date,
+                               save_path):
+     """
+    Download individual month directory of .grd files to local directory in
+    asynchronous implementation.
+
+    This function will download using the ftplib all the .grd files between the
+    start_date and the end_date. All dates in the NOAA NARR FTP server are
+    stored following this order:
+        data
+        ├── year/month
+            ├── year/month/day01
+            ├── year/month/day02
+
+    Here we download the monthly directory with the user-defined dates in the
+    start and end dates. 
+
+    Params:
+        - start_year str: year to start download.
+        - end_year str: year to stop download.
+    """
+
+    logger = logging.getLogger(__name__)
+
+    if not isinstance(start_day_date, datetime):
+        start_day_date = datetime.strptime(start_day_date, '%Y-%m-%d')
+    else:
+        ValueError(f'{start_date} is not in the correct format or not a valid type')
+
+    base_url = "https://nomads.ncdc.noaa.gov/data/narr"
+    month_dir, day_dir = (start_month_date.strftime('%Y%m'), start_month_date.strftime('%Y%m%d'))
+    url_time = URL(base_url, month_dir, day_dir)
+
+    path = os.path.join(save_path, month_dir, day_dir)
+    logger.info(f'Starting transmission for {grb} file')
+
+    if os.path.exists(path):
+        logger.info('Directory exists! Skip dir creation')
+    else:
+        os.makedirs(path)
+
+
+    date_range_daily = datetime_range(start=start_day_date,
+                                      end=start_day_date +
+                                      relativedelta(days=1),
+                                      delta={'hours': 3})
+
+    grib_files_day = [f'narr-a_221_{date.strftime("%Y%m%d_%H%M")}_000.grb' for
+                      date in date_range_daily]
+
+    async def download_unique_date(session, url):
+        with async_timeout.timeout(10):
+            async with session.get(url) as response:
+                async with aiofiles.open(path, url.name) as file_stream:
+                    while True:
+                        chunk = await response.content.read()
+                        if not chunk:
+                            break
+                        await file_streak.write(chunk)
+                return await response.release()
+
+
+    tasks = []
+    async with aiohttp.ClientSession() as session:
+        for grib_file in grib_files_day:
+            url_download = URL(url_time, grib_file)
+            task = asyncio.ensure_future(download_unique_date(session,
+                                                              url_download))
+            tasks.append(task)
+            await asyncio.gather(*tasks)
 
 
 def retrieve_individual_month(start_date,
@@ -246,9 +321,5 @@ def docker_execute_degrib(client_name,
 
     container = client.containers.get(container_id[0])
     container.exec_run(['/bin/bash',  '-c', command], detach=True)
-
-
-
-
 
 
