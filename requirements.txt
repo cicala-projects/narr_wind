@@ -4,3 +4,9 @@ requests
 pyproj
 ipython
 matplotlib
+luigi
+docker
+aiohttp[speedups]
+bs4
+urlpath
+aiofiles
