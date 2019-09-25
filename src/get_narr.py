@@ -8,6 +8,10 @@ import docker
 import logging
 import requests
 import asyncio
+import aiofiles
+import aiohttp
+import async_timeout
+from urlpath import URL
 from aiohttp import ClientSession
 from itertools import product
 from functools import partial
@@ -37,9 +41,9 @@ def datetime_range(start, end, delta):
         current += delta
 
 
-async def retrieve_day_async(start_month_date,
-                               save_path):
-     """
+def retrieve_month_async(start_day_date,
+                             save_path):
+    """
     Download individual month directory of .grd files to local directory in
     asynchronous implementation.
 
@@ -64,49 +68,59 @@ async def retrieve_day_async(start_month_date,
     if not isinstance(start_day_date, datetime):
         start_day_date = datetime.strptime(start_day_date, '%Y-%m-%d')
     else:
-        ValueError(f'{start_date} is not in the correct format or not a valid type')
+        ValueError(f'{start_day_date} is not in the correct format or not a valid type')
 
     base_url = "https://nomads.ncdc.noaa.gov/data/narr"
-    month_dir, day_dir = (start_month_date.strftime('%Y%m'), start_month_date.strftime('%Y%m%d'))
-    url_time = URL(base_url, month_dir, day_dir)
 
-    path = os.path.join(save_path, month_dir, day_dir)
-    logger.info(f'Starting transmission for {grb} file')
+    # Build month grb URL paths
+    time_generators = [datetime_range(start_time, 
+                                     start_time + relativedelta(days=1),
+                                      {'hours': 3}) for start_time in 
+                      datetime_range(start_day_date,
+                                    start_day_date + relativedelta(months=1),
+                                     {'days': 1})
+                      ]
 
-    if os.path.exists(path):
-        logger.info('Directory exists! Skip dir creation')
-    else:
-        os.makedirs(path)
+    grib_files_url = [URL(base_url,
+                          date.strftime('%Y%m'),
+                          date.strftime('%Y%m%d'),
+                          f'narr-a_221_{date.strftime("%Y%m%d_%H%M")}_000.grb') 
+                      for generator in time_generators for date in generator]
 
+    async def download_coroutine(session, url):
+        url_obj = URL(url)
+        month_dir, day_dir = (url_obj.parts[3], url_obj.parts[4])
+        path = os.path.join(save_path, month_dir, day_dir)
+        logger.info(f'Starting transmission for {url} files')
 
-    date_range_daily = datetime_range(start=start_day_date,
-                                      end=start_day_date +
-                                      relativedelta(days=1),
-                                      delta={'hours': 3})
+        if os.path.exists(path):
+            logger.info('Directory exists! Skip dir creation')
+        else:
+            os.makedirs(path)
 
-    grib_files_day = [f'narr-a_221_{date.strftime("%Y%m%d_%H%M")}_000.grb' for
-                      date in date_range_daily]
+        async with session.get(url) as response:
+            filepath = os.path.join(path, url_obj.name)
+            async with aiofiles.open(os.path.join(path, url_obj.name), 'wb') as file_stream:
+                while True:
+                    chunk = await response.content.read()
+                    if not chunk:
+                        break
+                    await file_stream.write(chunk)
+            return await response.release()
 
-    async def download_unique_date(session, url):
-        with async_timeout.timeout(10):
-            async with session.get(url) as response:
-                async with aiofiles.open(path, url.name) as file_stream:
-                    while True:
-                        chunk = await response.content.read()
-                        if not chunk:
-                            break
-                        await file_streak.write(chunk)
-                return await response.release()
+    async def main(loop, url):
+        sem = asyncio.Semaphore(-1)
+        connector = aiohttp.TCPConnector(limit=60, share_cookies=True)
+        async with aiohttp.ClientSession(loop=loop, connector=connector) as session:
+            async with sem:
+                await download_coroutine(session, url)
 
-
-    tasks = []
-    async with aiohttp.ClientSession() as session:
-        for grib_file in grib_files_day:
-            url_download = URL(url_time, grib_file)
-            task = asyncio.ensure_future(download_unique_date(session,
-                                                              url_download))
-            tasks.append(task)
-            await asyncio.gather(*tasks)
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(
+        asyncio.gather(
+            *(main(loop, url.as_uri()) for url in grib_files_url)
+        )
+    )
 
 
 def retrieve_individual_month(start_date,
