@@ -2,19 +2,17 @@
 Retrieve and store NARR files from the NOAA FTP server
 """
 
-
+import io
 import os
 import boto3
 import docker
 import logging
 import requests
-import asyncio
-import aiofiles
-import aiohttp
 import zipfile
+import threading
 import smart_open
-import async_timeout
-import concurrent.futures
+import multiprocessing
+from tempfile import NamedTemporaryFile
 from bs4 import BeautifulSoup
 from urlpath import URL
 from aiohttp import ClientSession
@@ -24,6 +22,9 @@ from multiprocessing import Pool
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 
+
+logger = logging.getLogger('luigi-interface')
+threadLocal = threading.local()
 
 def dict_product(d):
     """
@@ -46,10 +47,13 @@ def datetime_range(start, end, delta):
         current += delta
 
 
-def requests_to_s3(base_url,
-                  file_name,
-                  auth):
+def get_session():
+    if not hasattr(threadLocal, "session"):
+        threadLocal.session = requests.Session()
+    return threadLocal.session
 
+
+def requests_to_s3(url):
     """
     Request (GET) a URL and stream their contents into an s3 bucket
     using smart_open.
@@ -62,15 +66,25 @@ def requests_to_s3(base_url,
     multiprocess call, as in the stream_download_s3_parallel function. 
     :param str base_url:
     """
+    headers = {'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/12.1.1 Safari/605.1.15'}
 
-    headers = {'Authorization': f'Bearer {auth}'}
-    print(f'{file_name}')
-    with requests.get(base_url + file_name, headers=headers) as file_request:
-        if file_request.status_code == requests.codes.ok:
-            return file_request.content
-        else:
-            logger.info(f'Request GET failed with {file_request.content} [{file_request.url}]')
+    logger.info(f'{url}')
+    session = get_session()
+    session.headers.update(headers)
+    file_name = URL(url).name
+    with session.get(url) as file_request:
+        try:
+            if file_request.status_code == requests.codes.ok:
+                print(f'Downloaded {url}')
+                return (file_name, file_request.content)
+            else:
+                logger.info(f'Request GET failed with {file_request.content} [{file_request.url}]')
 
+        except requests.exceptions.HTTPError as err:
+            logger.error(f'{err}')
+
+
+    return None
 
 
 def stream_time_range_s3(start_date,
@@ -79,7 +93,8 @@ def stream_time_range_s3(start_date,
                          aws_secret,
                          aws_bucket_name,
                          key,
-                         max_workers):
+                         max_workers,
+                         delta):
     """
     Download individual month directory of .grd files to local directory.
 
@@ -100,45 +115,51 @@ def stream_time_range_s3(start_date,
     """
 
     logger = logging.getLogger(__name__)
+    GB = 1024 ** 3
 
     if not isinstance(start_date, datetime):
         start_date = datetime.strptime(start_date, '%Y-%m-%d')
     else:
         ValueError(f'{start_date} is not in the correct format or not a valid type')
 
+
     session = boto3.Session(
         aws_access_key_id=aws_key,
         aws_secret_access_key=aws_secret
     )
 
+    base_url = 'https://nomads.ncdc.noaa.gov/data/narr'
     time = ['0000', '0300', '0600', '0900', '1200', '1500', '1800', '2100']
-    dates = datetime_range(start_date, end_date, {'days':1})
-
+ 
+    if delta is None:
+        dates = datetime_range(start_date, end_date, {'days':1})
+    else:
+        dates = datetime_range(start_date, end_date, delta)
 
     urls_time_range = []
     for day, time in product(dates, time):
            file_name = f'narr-a_221_{day.strftime("%Y%m%d")}_{time}_000.grb'
            url = URL(base_url, day.strftime('%Y%m'), day.strftime('%Y%m%d'))
-           urls_time_range.append(URL(url, file_name))
+           urls_time_range.append(str(URL(url, file_name)))
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        executor_url = {executor.submit(requests_to_s3, 
-                                        url,
-                                        file_name,
-                                        auth): file_name for file_name in urls_time_range}
+    with multiprocessing.Pool(max_workers) as p:
+        results = p.map(requests_to_s3, urls_time_range, chunksize=1)
 
-            buf = io.BytesIO()
+        print('Finish download')
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, mode='w', compression=zipfile.ZIP_DEFLATED, compresslevel=1) as zf:
+            for content_file_name, content_file_result in results:
+                try:
+                    zf.writestr(content_file_name,
+                                content_file_result)
+                except Exception as exc:
+                    print(exc)
 
-            with zipfile.ZipFile(buf, mode='w', compression=zipfile.ZIP_DEFLATED) as zf:
-                for content_file in concurrent.futures.as_completed(executor_url):
-                    zf.writestr(executor_url[content_file],
-                               content_file.result())
+        print('Finish zipping  - Upload Start')
+        with smart_open.s3.open(aws_bucket_name, key, 'wb', session=session) as so:
+            so.write(buf.getvalue())
 
-            with smart_open.open(key, 'wb', transport_params=dict(session=session)) as so:
-                so.write(buf.getvalue())
-
-        except requests.exceptions.HTTPError as err:
-            logger.error(f'{err}')
+    return None
 
 
 def retrieve_year_months(start_date,
