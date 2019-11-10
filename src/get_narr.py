@@ -96,8 +96,8 @@ def stream_time_range_s3(start_date,
                          aws_secret,
                          aws_bucket_name,
                          key,
-                         max_workers,
-                         delta):
+                         delta,
+                         max_workers=10):
     """
     Download individual month directory of .grd files to local directory.
 
@@ -117,7 +117,6 @@ def stream_time_range_s3(start_date,
         - end_year str: year to stop download.
     """
 
-    logger = logging.getLogger(__name__)
     GB = 1024 ** 3
 
     session = boto3.Session(profile_name='default')
@@ -161,7 +160,7 @@ def stream_time_range_s3(start_date,
         logger.info('Finish zipping  - Upload Start')
         s3.upload_file(path_to_temp_file, aws_bucket_name, key, Config=config)
 
-    return None
+    return path_to_temp_file
 
 
 def retrieve_year_months(start_date,
