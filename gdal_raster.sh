@@ -2,28 +2,32 @@
 
 PWD=$(pwd)
 PATH_IN_S3=$1
-PATH_TO_DOWNLOAD=$2
+SAVE_PATH_NAME=$2
+BANDS=$3
 
 # Create temp dir
-if [[ ! -d $PWD/temp_data ]]
+TEMP_DATA=$PWD/temp_data
+if [[ ! -d $TEMP_DATA ]]
 then
-    mkdir $PWD/temp_data
+    mkdir $TEMP_DATA
 fi
 
 # Create output dir
-if [[ ! -d $PWD/$2 ]]
+OUTPUT_DATA=$PWD/$2
+if [[ ! -d  $OUTPUT_DATA ]]
 then
-    mkdir $PWD/$2
+    mkdir $OUTPUT_DATA
 fi
 
 # Use AWS CLI to get data
-aws s3 cp $PATH_IN_S3 $PATH_TO_DOWNLOAD 
+ZIP_PATH=$TEMP_DATA/zip_file_temp.zip 
+aws s3 cp $PATH_IN_S3 $ZIP_PATH 
 
 # Unzip downloaded zip
-unzip $PATH_TO_DOWNLOAD -d unzip_raw_data
+unzip $ZIP_PATH -d $TEMP_DATA/unzip_raw_data
 
 # Run gdal_transform
-find ./unzip_raw_data -name '*.grb' -type f | parallel -- gdal_translate -of GTiff -b 293 -b 294 {} $PWD/$2/{/.}_raster.tif
+find $TEMP_DATA/unzip_raw_data -name '*.grb' -type f | parallel -- gdal_translate -of GTiff -b $3 {} $OUTPUT_DATA/{/.}_raster.tif
 
 # Delete temp dir
 echo 'Deleting temporary data directory'

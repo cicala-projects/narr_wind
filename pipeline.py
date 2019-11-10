@@ -18,15 +18,14 @@ from src.get_narr import (datetime_range,
 class OrderDownload(luigi.WrapperTask):
     months_narr = {
         'start_date': datetime_range(datetime(2000, 1, 1),
-                                    datetime(2001, 1, 1),
+                                     datetime(2001, 1, 1),
                                      {'months': 1 }),
+        'bands': [283, 284]
     }
 
     def requires(self):
             for month_message in dict_product(self.months_narr):
-                yield ExtractGRB2CSV(start_date=months_narr['start_date'],
-                                     message_extract=months_narr['message_extract']
-                                    )
+                yield MonthDownload(start_date=months_narr['start_date'])
 
 
 class MonthDownload(luigi.task):
@@ -67,6 +66,7 @@ class MonthDownload(luigi.task):
 def GRIB2TIFF(external_program.ExternalProgramTask):
     start_date = luigi.Parameter()
     save_dir = luigi.Parameter()
+    bands = luigi.Parameter()
 
     @property
     def save_path(self):
@@ -80,15 +80,41 @@ def GRIB2TIFF(external_program.ExternalProgramTask):
             f'narr_{self.start_date.strftime('%Y%m')}.zip'
         )
 
+    @property
+    def bands_parse(self):
+        return ','.join([str(a) for a in self.bands])
+
     def requires(self):
         return MonthDownload(start_date=self.start_date,
                              save_path=self.save_path)
 
     def output(self):
-        return luigi.LocalTarget(f'{save_path}')
+        return luigi.LocalTarget(f'{self.save_path}')
 
     def program_args(self):
-        return ['./gdal_raster.sh', ]
+        return ['./gdal_raster.sh', 
+                self.s3_path,
+                self.save_path,
+                self.bands_parse
+               ]
+
+
+def ReprojectMaskRaster(self.Task):
+
+    def requires(self):
+        return GRIB2TIFF(
+            start_date = self.start_date,
+            save_dir = self.save_dir,
+            bands = self.bands
+        )
+
+    def output(self):
+        return luigi.LocalTarget(f'{self.save_path}')
+
+    def run():
+
+
+
 
 def ExtractGRB2CSV(luigi.Task):
     start_date = luigi.Parameter(significant=True)
