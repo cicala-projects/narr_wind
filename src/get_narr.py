@@ -12,7 +12,6 @@ import zipfile
 import threading
 import smart_open
 import multiprocessing
-from tempfile import NamedTemporaryFile
 from bs4 import BeautifulSoup
 from urlpath import URL
 from aiohttp import ClientSession
@@ -21,6 +20,8 @@ from functools import partial
 from multiprocessing import Pool
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
+from tempfile import NamedTemporaryFile, mkdtemp
+from boto3.s3.transfer import TransferConfig
 
 
 logger = logging.getLogger('luigi-interface')
@@ -34,7 +35,7 @@ def dict_product(d):
     return list(dict(zip(d.keys(), values)) for values in product(*d.values()))
 
 
-def datetime_range(start, end, delta):
+def datetime_range(start, end, delta={'days': 1}):
     """
     Build a generator with dates within a range of datetime objects
     """
@@ -66,16 +67,18 @@ def requests_to_s3(url):
     multiprocess call, as in the stream_download_s3_parallel function. 
     :param str base_url:
     """
+    MAX_RETRIES=10
     headers = {'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/12.1.1 Safari/605.1.15'}
+    adapter = requests.adapters.HTTPAdapter(max_retries=MAX_RETRIES)
 
-    logger.info(f'{url}')
     session = get_session()
+    session.mount('https://', adapter)
     session.headers.update(headers)
     file_name = URL(url).name
     with session.get(url) as file_request:
         try:
             if file_request.status_code == requests.codes.ok:
-                print(f'Downloaded {url}')
+                logger.info(f'Downloaded {url}')
                 return (file_name, file_request.content)
             else:
                 logger.info(f'Request GET failed with {file_request.content} [{file_request.url}]')
@@ -117,24 +120,22 @@ def stream_time_range_s3(start_date,
     logger = logging.getLogger(__name__)
     GB = 1024 ** 3
 
+    session = boto3.Session(profile_name='default')
+    s3 = session.client('s3')
+    config = TransferConfig(multipart_threshold = 5 * GB) 
+
+    base_url = 'https://nomads.ncdc.noaa.gov/data/narr'
+    time = ['0000', '0300', '0600', '0900', '1200', '1500', '1800', '2100']
+
     if not isinstance(start_date, datetime):
         start_date = datetime.strptime(start_date, '%Y-%m-%d')
     else:
         ValueError(f'{start_date} is not in the correct format or not a valid type')
 
-
-    session = boto3.Session(
-        aws_access_key_id=aws_key,
-        aws_secret_access_key=aws_secret
-    )
-
-    base_url = 'https://nomads.ncdc.noaa.gov/data/narr'
-    time = ['0000', '0300', '0600', '0900', '1200', '1500', '1800', '2100']
- 
     if delta is None:
         dates = datetime_range(start_date, end_date, {'days':1})
     else:
-        dates = datetime_range(start_date, end_date, delta)
+        dates = datetime_range(start_date, end_date + delta)
 
     urls_time_range = []
     for day, time in product(dates, time):
@@ -145,9 +146,11 @@ def stream_time_range_s3(start_date,
     with multiprocessing.Pool(max_workers) as p:
         results = p.map(requests_to_s3, urls_time_range, chunksize=1)
 
-        print('Finish download')
-        buf = io.BytesIO()
-        with zipfile.ZipFile(buf, mode='w', compression=zipfile.ZIP_DEFLATED, compresslevel=1) as zf:
+        logger.info('Finish download')
+        temp_dir = mkdtemp()
+        temp_file = NamedTemporaryFile()
+        path_to_temp_file = os.path.join(temp_dir, temp_file.name)
+        with zipfile.ZipFile(path_to_temp_file, mode='w', compression=zipfile.ZIP_DEFLATED, compresslevel=1) as zf:
             for content_file_name, content_file_result in results:
                 try:
                     zf.writestr(content_file_name,
@@ -155,9 +158,8 @@ def stream_time_range_s3(start_date,
                 except Exception as exc:
                     print(exc)
 
-        print('Finish zipping  - Upload Start')
-        with smart_open.s3.open(aws_bucket_name, key, 'wb', session=session) as so:
-            so.write(buf.getvalue())
+        logger.info('Finish zipping  - Upload Start')
+        s3.upload_file(path_to_temp_file, aws_bucket_name, key, Config=config)
 
     return None
 
