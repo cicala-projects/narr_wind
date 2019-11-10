@@ -1,12 +1,14 @@
 numpy
 pandas
+rasterio
+fiona
+geopandas
 requests
 pyproj
 ipython
 matplotlib
-luigi
 docker
-aiohttp[speedups]
 bs4
 urlpath
-aiofiles
+luigi
+luigi_monitor
