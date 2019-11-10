@@ -10,21 +10,21 @@ from luigi_monitor import monitor
 from luigi.contrib import docker_runner, s3, external_program
 
 from src.get_narr import (datetime_range,
-                         retrieve_individual_month,
-                         dict_product,
+                          retrieve_individual_month,
+                          dict_product,
+                          stream_download_s3_parallel,
                          docker_execute_degrib)
 
 
 class OrderDownload(luigi.WrapperTask):
     months_narr = {
         'start_date': datetime_range(datetime(2000, 1, 1),
-                                     datetime(2001, 1, 1),
-                                     {'months': 1 }),
-        'bands': [283, 284]
+                                     datetime(2012, 1, 1),
+                                     {'months': 1 })
     }
 
     def requires(self):
-            for month_message in dict_product(self.months_narr):
+            for month in self.months_narr):
                 yield MonthDownload(start_date=months_narr['start_date'])
 
 
@@ -51,7 +51,8 @@ class MonthDownload(luigi.task):
         return path
 
     def complete(self):
-        return self.client.exists(self.file_key)
+        check_path = f's3://{s3Bucket().bucket}/{self.file_key}}'
+        return self.client.exists(check_path)
 
     def run(self):
         stream_time_range_s3(start_time=self.start_date,
@@ -111,9 +112,8 @@ def ReprojectMaskRaster(self.Task):
     def output(self):
         return luigi.LocalTarget(f'{self.save_path}')
 
-    def run():
-
-
+    def run(self):
+        pass
 
 
 def ExtractGRB2CSV(luigi.Task):
@@ -144,4 +144,15 @@ def ExtractGRB2CSV(luigi.Task):
         return docker_execute(client_name=self.client_name,
                               path_dir=self.path_extract,
                              message_code=self.message_extract)
+
+if __name__ == '__main__':
+
+    config = luigi.configuration.get_config()
+    slack_url = config.get('luigi-monitor', 'slack_url', None)
+    max_print = config.get('luigi-monitor', 'max_print', 5)
+    username = config.get('luigi-monitor', 'username', None)
+
+    with monitor(slack_url=slack_url, username=username, max_print=max_print):
+        luigi.run(main_task_cls=OrderDownload)
+
 
