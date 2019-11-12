@@ -4,8 +4,8 @@ from requests.packages.urllib3.util.retry import Retry
 
 
 def requests_retry_session(
-    retries=4,
-    backoff_factor=0.3,
+    retries=10,
+    backoff_factor=1, 
     status_forcelist=(500, 502, 504),
     session=None):
 
