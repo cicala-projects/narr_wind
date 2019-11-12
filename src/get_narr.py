@@ -53,8 +53,13 @@ def datetime_range(start, end, delta={'days': 1}):
 
 
 def get_session():
+
+    headers = {'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/12.1.1 Safari/605.1.15'}
+
     if not hasattr(threadLocal, "session"):
-        threadLocal.session = requests_retry_session()
+        threadLocal.session = requests.Session()
+        threadLocal.session.update(headers)
+
     return threadLocal.session
 
 
@@ -73,14 +78,13 @@ def requests_to_s3(url):
     """
     logger = logging.getLogger(__name__)
 
-    headers = {'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/12.1.1 Safari/605.1.15'}
-
     session = get_session()
-    session.headers.update(headers)
+
     file_name = URL(url).name
-    delay = np.random.choice(range(20))
+
+    delay = np.random.choice(range(10))
     time.sleep(delay)
-    with session.get(url) as file_request:
+    with requests_retry_session(session=s).get(url) as file_request:
         try:
             if file_request.status_code == requests.codes.ok:
                 logger.info(f'Downloaded {url}')
@@ -90,7 +94,6 @@ def requests_to_s3(url):
 
         except requests.exceptions.HTTPError as err:
             logger.error(f'{err}')
-
 
 
 def stream_time_range_s3(start_date,
