@@ -14,14 +14,16 @@ import smart_open
 import multiprocessing
 from bs4 import BeautifulSoup
 from urlpath import URL
-from aiohttp import ClientSession
 from itertools import product
 from functools import partial
+from pathlib import Path
 from multiprocessing import Pool
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 from tempfile import NamedTemporaryFile, mkdtemp
 from boto3.s3.transfer import TransferConfig
+
+from .utils import requests_retry_session
 
 
 logger = logging.getLogger('luigi-interface')
@@ -50,7 +52,7 @@ def datetime_range(start, end, delta={'days': 1}):
 
 def get_session():
     if not hasattr(threadLocal, "session"):
-        threadLocal.session = requests.Session()
+        threadLocal.session = requests_retry_session()
     return threadLocal.session
 
 
@@ -86,8 +88,6 @@ def requests_to_s3(url):
         except requests.exceptions.HTTPError as err:
             logger.error(f'{err}')
 
-
-    return None
 
 
 def stream_time_range_s3(start_date,
@@ -126,7 +126,7 @@ def stream_time_range_s3(start_date,
     base_url = 'https://nomads.ncdc.noaa.gov/data/narr'
     time = ['0000', '0300', '0600', '0900', '1200', '1500', '1800', '2100']
 
-    if not isinstance(start_date, datetime):
+    if not isinstance(start_date, datetime) and isinstance(start_date, str):
         start_date = datetime.strptime(start_date, '%Y-%m-%d')
     else:
         ValueError(f'{start_date} is not in the correct format or not a valid type')
@@ -163,12 +163,16 @@ def stream_time_range_s3(start_date,
     return path_to_temp_file
 
 
-def retrieve_year_months(start_date,
-                         end_date,
-                         delta,
-                         save_path):
+def download_process_data_local(start_date,
+                                end_date,
+                                aws_key,
+                                aws_secret,
+                                aws_bucket_name,
+                                delta,
+                                bands,
+                                max_workers=10):
     """
-    Download year directory of .grd files to local directory.
+    Download individual month directory of .grd files to local directory.
 
     This function will download using the ftplib all the .grd files between the
     start_date and the end_date. All dates in the NOAA NARR FTP server are
@@ -179,96 +183,111 @@ def retrieve_year_months(start_date,
             ├── year/month/day02
 
     Here we download the monthly directory with the user-defined dates in the
-    start and end dates. If delta is: {'months': 1}, then we will retrieve the
-    monthly directories corresponding to the date range. If delta is {'years':1}
-    then the functgion will dowload complete years within the date range. In
-    the case the end_date is None, the function will take the use the next
-    month as the end of the date range. Hence, if start_date = '2012-01-01',
-    the end_date will be '2012-02-01'. 
+    start and end dates. 
 
     Params:
         - start_year str: year to start download.
         - end_year str: year to stop download.
     """
 
-    logger = logging.getLogger(__name__)
+    GB = 1024 ** 3
+
+    session = boto3.Session(profile_name='default')
+    s3 = session.client('s3')
+    config = TransferConfig(multipart_threshold = 5 * GB) 
 
 
-    if end_date is not None:
-        dateranges = datetime_range(start_date,
-                                    end_date,
-                                    delta)
+    base_url = 'https://nomads.ncdc.noaa.gov/data/narr'
+    time = ['0000', '0300', '0600', '0900', '1200', '1500', '1800', '2100']
+
+    if not isinstance(start_date, datetime) and isinstance(start_date, str):
+        start_date = datetime.strptime(start_date, '%Y-%m-%d')
     else:
-        dateranges = datetime_range(start_year,
-                                    start_year + relativedelta(**{'months': 1}),
-                                    {'months': 1})
+        ValueError(f'{start_date} is not in the correct format or not a valid type')
 
-    with FTP('nomads.ncdc.noaa.gov') as ftp:
-        response = ftp.login()
-        if response == '230 Anonymous access granted, restrictions apply':
+    if delta is None:
+        dates = datetime_range(start_date, end_date, {'days':1})
+    else:
+        dates = datetime_range(start_date, end_date + delta)
 
-            for date in dateranges:
-                date_str = date.strftime('%Y%m')
-                logger.info(f'Starting year/month: {date_str}')
+    urls_time_range = []
+    for day, time in product(dates, time):
+           file_name = f'narr-a_221_{day.strftime("%Y%m%d")}_{time}_000.grb'
+           url = URL(base_url, day.strftime('%Y%m'), day.strftime('%Y%m%d'))
+           urls_time_range.append(str(URL(url, file_name)))
+
+    with multiprocessing.Pool(max_workers) as p:
+        results = p.map(requests_to_s3, urls_time_range, chunksize=1)
+
+        logger.info(f'Finish download for start_date {start_date.strftime("%Y-%m")}')
+        temp_dir_grb = mkdtemp()
+        temp_file_grb = NamedTemporaryFile()
+        path_to_temp_file = os.path.join(temp_dir_grb,
+                                         f'{temp_file_grb.name}.zip')
+        with zipfile.ZipFile(path_to_temp_file, mode='w', compression=zipfile.ZIP_DEFLATED, compresslevel=1) as zf:
+            for content_file_name, content_file_result in results:
                 try:
-                    ftp.cwd(f'NARR/{date_str}')
-                    dirnames = ftp.nlst()
-                    for day in dirnames:
-                        ftp.cwd(f'{day}')
+                    zf.writestr(content_file_name,
+                                content_file_result)
+                except Exception as exc:
+                    logger.info(exc)
 
-                        # Select only narr-b files with the measured (not
-                        # predicted) values.
-                        grb_files = [f for f in ftp.nlst() if
-                                     f.startswith('narr-a') and 
-                                     f.endswith('.grb')]
+        temp_dir_geo = mkdtemp()
+        temp_file_geo = NamedTemporaryFile()
+        path_to_zip_file = os.path.join(temp_dir_geo, '{temp_file_geo.name}.zip')
+        gdal_transform_tempfile(temp_file_path=path_to_temp_file,
+                               out_dir=temp_dir_geo,
+                               bands=bands)
 
-                        for grb in grb_files:
-                            path = os.path.join(save_path, date_str, day)
-                            logger.info(f'Starting transmission for {grb} file')
+        try:
+            print('Zipping geo')
+            path_geotiffs = Path(temp_dir_geo).rglob('*.tif')
+            with zipfile.ZipFile(path_to_zip_file, mode='w',
+                                 compression=zipfile.ZIP_DEFLATED,
+                                 compresslevel=1) as zip_geo:
+                for geo_file in path_geotiffs:
+                    zip_geo.write(geo_file)
 
-                            if os.path.exists(path):
-                                logger.info('Directory exists! Skip dir creation')
-                            else:
-                                os.makedirs(path)
-
-                            with open(os.path.join(path, grb), 'wb') as file_grb:
-                                ftp.retrbinary(f'RETR {grb}', file_grb.write)
-
-                        ftp.cwd('..')
-                    ftp.cwd('../..')
-                except all_errors as e:
-                    logger.debug(f'Oops! Something went wrong. FTP error: {e}')
-
-        else:
-            logger.error(f'FTP Connection error: {response}')
-
-    # Close conn after getting year. Allow other workers to login
-    ftp.close()
+            logger.info('Finish zipping  - Upload Start')
+            key = f"narr_data_{start_date.strftime('%Y_%m')}"
+            s3.upload_file(path_to_zip_file, aws_bucket_name, key,
+                           Config=config)
+        except Exception as exc:
+            logger.info(exc)
 
 
-def retrieve_year_parallel(start_date,
-                           end_date,
-                           number_workers,
-                           path):
-    '''
-    Parallel implementation of retrieve year function. The function will take
-    two initial dates and build a date range. Each element of the range will be
-    processed in parallel. 
-    '''
 
-    logger = logging.getLogger(__name__)
+def gdal_transform_tempfile(temp_file_path,
+                            out_dir,
+                            bands):
+    """
+    Transform GRIB data in temporal directory to GeoTIFF files using GDAL
+    transform function
+    """
 
-    year_range = datetime_range(start=start_date,
-                                end=end_date,
-                                delta={'months': 1})
+    import subprocess
 
-    with Pool(number_workers) as p:
-        func_map = partial(retrieve_year,
-                           end_year=None,
-                           save_path=path)
+    if os.path.exists(out_dir):
+        logger.info('{out_dir} Already created')
+    else:
+        os.mkdir(out_dir)
 
-        results = p.map(func_map, year_range, chunksize=1)
-        print(results)
+    ZIPINFO_OUT = subprocess.Popen((f"zipinfo -1 {temp_file_path}"),
+                                   stdout=subprocess.PIPE,
+                                   stderr=subprocess.STDOUT,
+                                   shell=True)
+
+    GDAL_CMD = subprocess.check_output((
+        "parallel "
+        "gdal_translate "
+        "-of GTiff "
+        f"{' '.join([f'-b {str(b)}' for b in bands])} "
+        f"/vsizip/{temp_file_path}" + "/{} "
+        f"{out_dir}"+"/{/.}_raster.tif"),
+        stdin=ZIPINFO_OUT.stdout,
+        shell=True)
+    ZIPINFO_OUT.wait()
+
 
 
 def docker_execute_degrib(client_name,
