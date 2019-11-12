@@ -69,6 +69,8 @@ def requests_to_s3(url):
     multiprocess call, as in the stream_download_s3_parallel function. 
     :param str base_url:
     """
+    logger = logging.getLogger(__name__)
+
     MAX_RETRIES=10
     headers = {'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/12.1.1 Safari/605.1.15'}
     adapter = requests.adapters.HTTPAdapter(max_retries=MAX_RETRIES)
@@ -195,10 +197,13 @@ def download_process_data_local(start_date,
     session = boto3.Session(profile_name='default')
     s3 = session.client('s3')
     config = TransferConfig(multipart_threshold = 5 * GB) 
-
+    logger = logging.getLogger(__name__)
 
     base_url = 'https://nomads.ncdc.noaa.gov/data/narr'
     time = ['0000', '0300', '0600', '0900', '1200', '1500', '1800', '2100']
+
+    if end_date is None:
+        end_date = start_date + relativedelta(**{'months': 1})
 
     if not isinstance(start_date, datetime) and isinstance(start_date, str):
         start_date = datetime.strptime(start_date, '%Y-%m-%d')
@@ -246,15 +251,14 @@ def download_process_data_local(start_date,
                                  compression=zipfile.ZIP_DEFLATED,
                                  compresslevel=1) as zip_geo:
                 for geo_file in path_geotiffs:
-                    zip_geo.write(geo_file)
+                    zip_geo.write(geo_file, geo_file.name)
 
             logger.info('Finish zipping  - Upload Start')
-            key = f"narr_data_{start_date.strftime('%Y_%m')}"
+            key = f"processed_geotiff_wind/narr_data_{start_date.strftime('%Y_%m')}.zip"
             s3.upload_file(path_to_zip_file, aws_bucket_name, key,
                            Config=config)
         except Exception as exc:
             logger.info(exc)
-
 
 
 def gdal_transform_tempfile(temp_file_path,
