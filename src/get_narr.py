@@ -4,6 +4,7 @@ Retrieve and store NARR files from the NOAA FTP server
 
 import io
 import os
+import time
 import boto3
 import docker
 import logging
@@ -12,6 +13,7 @@ import zipfile
 import threading
 import smart_open
 import multiprocessing
+import numpy as np
 from bs4 import BeautifulSoup
 from urlpath import URL
 from itertools import product
@@ -26,7 +28,7 @@ from boto3.s3.transfer import TransferConfig
 from .utils import requests_retry_session
 
 
-logger = logging.getLogger('luigi-interface')
+logger = logging.getLogger(__name__)
 threadLocal = threading.local()
 
 def dict_product(d):
@@ -71,14 +73,13 @@ def requests_to_s3(url):
     """
     logger = logging.getLogger(__name__)
 
-    MAX_RETRIES=10
     headers = {'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/12.1.1 Safari/605.1.15'}
-    adapter = requests.adapters.HTTPAdapter(max_retries=MAX_RETRIES)
 
     session = get_session()
-    session.mount('https://', adapter)
     session.headers.update(headers)
     file_name = URL(url).name
+    delay = np.random.choice(range(20))
+    time.sleep(delay)
     with session.get(url) as file_request:
         try:
             if file_request.status_code == requests.codes.ok:
@@ -191,13 +192,12 @@ def download_process_data_local(start_date,
         - start_year str: year to start download.
         - end_year str: year to stop download.
     """
-
+    logger = logging.getLogger(__name__)
     GB = 1024 ** 3
 
     session = boto3.Session(profile_name='default')
     s3 = session.client('s3')
     config = TransferConfig(multipart_threshold = 5 * GB) 
-    logger = logging.getLogger(__name__)
 
     base_url = 'https://nomads.ncdc.noaa.gov/data/narr'
     time = ['0000', '0300', '0600', '0900', '1200', '1500', '1800', '2100']
