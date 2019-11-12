@@ -5,8 +5,9 @@ from requests.packages.urllib3.util.retry import Retry
 
 def requests_retry_session(
     retries=10,
+    timeout=5,
     backoff_factor=1, 
-    status_forcelist=(500, 502, 504),
+    status_forcelist=(500, 502, 504, 503),
     session=None):
 
     """
