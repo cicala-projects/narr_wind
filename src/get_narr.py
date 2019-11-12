@@ -78,7 +78,7 @@ def requests_to_s3(url):
     """
     logger = logging.getLogger(__name__)
 
-    session = get_session()
+    s = get_session()
 
     file_name = URL(url).name
 
