@@ -275,7 +275,7 @@ def gdal_transform_tempfile(temp_file_path,
     import subprocess
 
     if os.path.exists(out_dir):
-        logger.info('{out_dir} Already created')
+        logger.info(f'{out_dir} Already created')
     else:
         os.mkdir(out_dir)
 
@@ -288,7 +288,7 @@ def gdal_transform_tempfile(temp_file_path,
         "parallel "
         "gdal_translate "
         "-of GTiff "
-        f"{' '.join([f'-b {str(b)}' for b in bands])} "
+        f"{' '.join([f'-b {str(int(b))}' for b in bands])} "
         f"/vsizip/{temp_file_path}" + "/{} "
         f"{out_dir}"+"/{/.}_raster.tif"),
         stdin=ZIPINFO_OUT.stdout,
