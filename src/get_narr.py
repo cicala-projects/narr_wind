@@ -82,7 +82,7 @@ def requests_to_s3(url):
 
     file_name = URL(url).name
 
-    delay = np.random.choice(range(10))
+    delay = np.random.choice(range(5))
     time.sleep(delay)
     with requests_retry_session(session=s).get(url) as file_request:
         try:
@@ -176,6 +176,8 @@ def download_process_data_local(start_date,
                                 aws_bucket_name,
                                 delta,
                                 bands,
+                                zip_grib=False,
+                                chunksize=5,
                                 max_workers=10):
     """
     Download individual month directory of .grd files to local directory.
@@ -225,30 +227,40 @@ def download_process_data_local(start_date,
            urls_time_range.append(str(URL(url, file_name)))
 
     with multiprocessing.Pool(max_workers) as p:
-        results = p.map(requests_to_s3, urls_time_range, chunksize=1)
+        results = p.map(requests_to_s3, urls_time_range, chunksize=chunksize)
 
-        logger.info(f'Finish download for start_date {start_date.strftime("%Y-%m")}')
-        temp_dir_grb = mkdtemp()
-        temp_file_grb = NamedTemporaryFile()
-        path_to_temp_file = os.path.join(temp_dir_grb,
-                                         f'{temp_file_grb.name}.zip')
-        with zipfile.ZipFile(path_to_temp_file, mode='w', compression=zipfile.ZIP_DEFLATED, compresslevel=1) as zf:
+        if zip_grib:
+            logger.info(f'Finish download for start_date {start_date.strftime("%Y-%m")}')
+            temp_dir_grb = mkdtemp()
+            temp_file_grb = NamedTemporaryFile()
+            path_to_temp_file = os.path.join(temp_dir_grb,
+                                             f'{temp_file_grb.name}.zip')
+            with zipfile.ZipFile(path_to_temp_file, mode='w', 
+                                 compression=zipfile.ZIP_DEFLATED, compresslevel=1) as zf:
+                for content_file_name, content_file_result in results:
+                    try:
+                        zf.writestr(content_file_name,
+                                    content_file_result)
+                    except Exception as exc:
+                        logger.info(exc)
+
+        else:
+            path_to_temp_file = mkdtemp()
             for content_file_name, content_file_result in results:
-                try:
-                    zf.writestr(content_file_name,
-                                content_file_result)
-                except Exception as exc:
-                    logger.info(exc)
+                with open(os.path.join(path_to_temp_file, content_file_name), 'wb') as grb_file:
+                    grb_file.write(content_file_result)
 
         temp_dir_geo = mkdtemp()
-        temp_file_geo = NamedTemporaryFile()
-        path_to_zip_file = os.path.join(temp_dir_geo, '{temp_file_geo.name}.zip')
+        logger.info(f'Transforming GRIB to GeoTIFF using GDAL [{start_date.strftime("%Y-%m")}]')
         gdal_transform_tempfile(temp_file_path=path_to_temp_file,
                                out_dir=temp_dir_geo,
-                               bands=bands)
+                               bands=bands,
+                               zip_grib=zip_grib)
 
         try:
-            print('Zipping geo')
+            logger.info(f'Zipping GEOTiffs files and packing to upload [{start_date.strftime("%Y-%m")}]')
+            temp_file_geo = NamedTemporaryFile()
+            path_to_zip_file = os.path.join(temp_dir_geo, '{temp_file_geo.name}.zip')
             path_geotiffs = Path(temp_dir_geo).rglob('*.tif')
             with zipfile.ZipFile(path_to_zip_file, mode='w',
                                  compression=zipfile.ZIP_DEFLATED,
@@ -256,7 +268,7 @@ def download_process_data_local(start_date,
                 for geo_file in path_geotiffs:
                     zip_geo.write(geo_file, geo_file.name)
 
-            logger.info('Finish zipping  - Upload Start')
+            logger.info(f'Finish zipping  - Starting upload to S3 [{start_date.strftime("%Y-%m")}]')
             key = f"processed_geotiff_wind/narr_data_{start_date.strftime('%Y_%m')}.zip"
             s3.upload_file(path_to_zip_file, aws_bucket_name, key,
                            Config=config)
@@ -266,7 +278,8 @@ def download_process_data_local(start_date,
 
 def gdal_transform_tempfile(temp_file_path,
                             out_dir,
-                            bands):
+                            bands,
+                            zip_grib):
     """
     Transform GRIB data in temporal directory to GeoTIFF files using GDAL
     transform function
@@ -274,28 +287,39 @@ def gdal_transform_tempfile(temp_file_path,
 
     import subprocess
 
-    if os.path.exists(out_dir):
-        logger.info(f'{out_dir} Already created')
+    if zip_grib:
+        ZIPINFO_OUT = subprocess.Popen((f"zipinfo -1 {temp_file_path}"),
+                                       stdout=subprocess.PIPE,
+                                       stderr=subprocess.STDOUT,
+                                       shell=True)
+
+        GDAL_CMD = subprocess.check_output((
+            "parallel "
+            "gdal_translate "
+            "-of GTiff "
+            f"{' '.join([f'-b {str(int(b))}' for b in bands])} "
+            f"/vsizip/{temp_file_path}" + "/{} "
+            f"{out_dir}"+"/{/.}_raster.tif"),
+            stdin=ZIPINFO_OUT.stdout,
+            shell=True)
+        ZIPINFO_OUT.wait()
     else:
-        os.mkdir(out_dir)
+        ZIPINFO_OUT = subprocess.Popen((f"find {temp_file_path} -name '*.grb'"),
+                                       stdout=subprocess.PIPE,
+                                       stderr=subprocess.STDOUT,
+                                       shell=True)
 
-    ZIPINFO_OUT = subprocess.Popen((f"zipinfo -1 {temp_file_path}"),
-                                   stdout=subprocess.PIPE,
-                                   stderr=subprocess.STDOUT,
-                                   shell=True)
-
-    GDAL_CMD = subprocess.check_output((
-        "parallel "
-        "gdal_translate "
-        "-of GTiff "
-        f"{' '.join([f'-b {str(int(b))}' for b in bands])} "
-        f"/vsizip/{temp_file_path}" + "/{} "
-        f"{out_dir}"+"/{/.}_raster.tif"),
-        stdin=ZIPINFO_OUT.stdout,
-        shell=True)
-    ZIPINFO_OUT.wait()
-
-
+        GDAL_CMD = subprocess.check_output((
+            "parallel "
+            "gdal_translate "
+            "-of GTiff "
+            f"{' '.join([f'-b {str(int(b))}' for b in bands])} "
+            "{} "
+            f"{out_dir}"+"/{/.}_raster.tif"),
+            stdin=ZIPINFO_OUT.stdout,
+            shell=True)
+        ZIPINFO_OUT.wait()
+ 
 
 def docker_execute_degrib(client_name,
                           path_dir,
