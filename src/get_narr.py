@@ -58,7 +58,7 @@ def get_session():
 
     if not hasattr(threadLocal, "session"):
         threadLocal.session = requests.Session()
-        threadLocal.session.update(headers)
+        threadLocal.session.headers.update(headers)
 
     return threadLocal.session
 
