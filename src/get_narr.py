@@ -281,16 +281,16 @@ def download_process_data_local(start_date,
             s3.upload_file(path_to_zip_file, aws_bucket_name, key,
                            Config=config)
 
-            try:
-                [shutil.rmtree(x) for x in [temp_dir_geo, path_to_tempfile]]
-            except NameError:
-                logger.info('No temporary directory object found. Probably related to zip_grib = True')
-            finally:
-                [shutil.rmtree(x) for x in [temp_dir_geo, temp_dir_grb]]
-
-
         except Exception as exc:
             logger.info(exc)
+
+        try:
+            [shutil.rmtree(x) for x in [temp_dir_geo, path_to_tempfile]]
+        except NameError:
+            logger.info('No temporary directory object found. Probably related to zip_grib = True')
+        finally:
+            [shutil.rmtree(x) for x in [temp_dir_geo, temp_dir_grb]]
+
 
 
 def gdal_transform_tempfile(temp_file_path,
