@@ -5,6 +5,7 @@ Retrieve and store NARR files from the NOAA FTP server
 import io
 import os
 import time
+import shutil
 import boto3
 import docker
 import logging
@@ -28,7 +29,7 @@ from boto3.s3.transfer import TransferConfig
 from .utils import requests_retry_session
 
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('luigi-interface')
 threadLocal = threading.local()
 
 def dict_product(d):
@@ -76,7 +77,7 @@ def requests_to_s3(url):
     multiprocess call, as in the stream_download_s3_parallel function. 
     :param str base_url:
     """
-    logger = logging.getLogger(__name__)
+    logger = logging.getLogger('luigi-interface')
 
     s = get_session()
 
@@ -170,12 +171,12 @@ def stream_time_range_s3(start_date,
 
 
 def download_process_data_local(start_date,
+                                bands,
                                 end_date,
                                 aws_key,
                                 aws_secret,
                                 aws_bucket_name,
                                 delta,
-                                bands,
                                 zip_grib=False,
                                 chunksize=5,
                                 max_workers=10):
@@ -197,7 +198,7 @@ def download_process_data_local(start_date,
         - start_year str: year to start download.
         - end_year str: year to stop download.
     """
-    logger = logging.getLogger(__name__)
+    logger = logging.getLogger('luigi-interface')
     GB = 1024 ** 3
 
     session = boto3.Session(profile_name='default')
@@ -272,6 +273,9 @@ def download_process_data_local(start_date,
             key = f"processed_geotiff_wind/narr_data_{start_date.strftime('%Y_%m')}.zip"
             s3.upload_file(path_to_zip_file, aws_bucket_name, key,
                            Config=config)
+
+            [shutil.rmtree(x) for x in [temp_dir_geo, temp_dir_grb]]
+
         except Exception as exc:
             logger.info(exc)
 
