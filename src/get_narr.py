@@ -64,7 +64,7 @@ def get_session():
     return threadLocal.session
 
 
-def requests_to_s3(url):
+def requests_to_s3(url, retries=10):
     """
     Request (GET) a URL and stream their contents into an s3 bucket
     using smart_open.
@@ -85,7 +85,7 @@ def requests_to_s3(url):
 
     delay = np.random.choice(range(5))
     time.sleep(delay)
-    with requests_retry_session(session=s).get(url) as file_request:
+    with requests_retry_session(session=s, retries).get(url) as file_request:
         try:
             if file_request.status_code == requests.codes.ok:
                 logger.info(f'Downloaded {url}')
@@ -179,6 +179,7 @@ def download_process_data_local(start_date,
                                 delta,
                                 zip_grib=False,
                                 chunksize=5,
+                                retries=5
                                 max_workers=10):
     """
     Download individual month directory of .grd files to local directory.
