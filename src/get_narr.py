@@ -85,7 +85,7 @@ def requests_to_s3(url, retries=10):
 
     delay = np.random.choice(range(5))
     time.sleep(delay)
-    with requests_retry_session(session=s, retries).get(url) as file_request:
+    with requests_retry_session(session=s, retries=retries).get(url) as file_request:
         try:
             if file_request.status_code == requests.codes.ok:
                 logger.info(f'Downloaded {url}')
@@ -179,7 +179,7 @@ def download_process_data_local(start_date,
                                 delta,
                                 zip_grib=False,
                                 chunksize=5,
-                                retries=5
+                                retries=5,
                                 max_workers=10):
     """
     Download individual month directory of .grd files to local directory.
@@ -229,7 +229,10 @@ def download_process_data_local(start_date,
            urls_time_range.append(str(URL(url, file_name)))
 
     with multiprocessing.Pool(max_workers) as p:
-        results = p.map(requests_to_s3, urls_time_range, chunksize=chunksize)
+        results = p.map(partial(requests_to_s3, 
+                                retries=retries),
+                        urls_time_range, 
+                        chunksize=chunksize)
 
         if zip_grib:
             logger.info(f'Finish download for start_date {start_date.strftime("%Y-%m")}')
