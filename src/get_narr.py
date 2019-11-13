@@ -268,7 +268,7 @@ def download_process_data_local(start_date,
         try:
             logger.info(f'Zipping GEOTiffs files and packing to upload [{start_date.strftime("%Y-%m")}]')
             temp_file_geo = NamedTemporaryFile()
-            path_to_zip_file = os.path.join(temp_dir_geo, '{temp_file_geo.name}.zip')
+            path_to_zip_file = os.path.join(temp_dir_geo, f'{temp_file_geo.name}.zip')
             path_geotiffs = Path(temp_dir_geo).rglob('*.tif')
             with zipfile.ZipFile(path_to_zip_file, mode='w',
                                  compression=zipfile.ZIP_DEFLATED,
@@ -284,13 +284,8 @@ def download_process_data_local(start_date,
         except Exception as exc:
             logger.info(exc)
 
-        try:
-            [shutil.rmtree(x) for x in [temp_dir_geo, path_to_tempfile]]
-        except NameError:
-            logger.info('No temporary directory object found. Probably related to zip_grib = True')
-        finally:
-            [shutil.rmtree(x) for x in [temp_dir_geo, temp_dir_grb]]
-
+        shutil.rmtree(path_to_temp_file)
+        shutil.rmtree(temp_dir_geo)
 
 
 def gdal_transform_tempfile(temp_file_path,
