@@ -25,7 +25,7 @@ logger = logging.getLogger('luigi-interface')
 
 class OrderDownload(luigi.WrapperTask):
     date_list = [
-        datetim1, 1),?!? (*_*args*_*, kwargs) ?!?jedi?!?
+        datetime(2001, 1, 1),
         datetime(2001, 2, 1),
         datetime(2001, 3, 1),
         datetime(2001, 4, 1),
@@ -108,8 +108,8 @@ class MonthDownload(luigi.Task):
     @property
     def file_key(self):
         path = os.path.join(
-            'raw_data_narr',
-            f"narr_{self.start_date.strftime('%Y%m')}.zip")
+            'processed_geotiff_wind',
+            f"narr_data_{self.start_date.strftime('%Y_%m')}.zip")
         return path
 
     @property
