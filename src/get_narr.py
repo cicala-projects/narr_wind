@@ -83,7 +83,7 @@ def requests_to_s3(url, retries=10):
 
     with requests.Session() as s:
 
-        s.headers.update(heaaders)
+        s.headers.update(headers)
         file_name = URL(url).name
 
         delay = np.random.choice(range(5))
