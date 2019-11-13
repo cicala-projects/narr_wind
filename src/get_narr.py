@@ -78,23 +78,26 @@ def requests_to_s3(url, retries=10):
     :param str base_url:
     """
     logger = logging.getLogger('luigi-interface')
+    headers = {'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/12.1.1 Safari/605.1.15'}
 
-    s = get_session()
 
-    file_name = URL(url).name
+    with requests.Session() as s:
 
-    delay = np.random.choice(range(5))
-    time.sleep(delay)
-    with requests_retry_session(session=s, retries=retries).get(url) as file_request:
-        try:
-            if file_request.status_code == requests.codes.ok:
-                logger.info(f'Downloaded {url}')
-                return (file_name, file_request.content)
-            else:
-                logger.info(f'Request GET failed with {file_request.content} [{file_request.url}]')
+        s.headers.update(heaaders)
+        file_name = URL(url).name
 
-        except requests.exceptions.HTTPError as err:
-            logger.error(f'{err}')
+        delay = np.random.choice(range(5))
+        time.sleep(delay)
+        with requests_retry_session(session=s, retries=retries).get(url) as file_request:
+            try:
+                if file_request.status_code == requests.codes.ok:
+                    logger.info(f'Downloaded {url}')
+                    return (file_name, file_request.content)
+                else:
+                    logger.info(f'Request GET failed with {file_request.content} [{file_request.url}]')
+
+            except requests.exceptions.HTTPError as err:
+                logger.error(f'{err}')
 
 
 def stream_time_range_s3(start_date,
