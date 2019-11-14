@@ -285,7 +285,7 @@ def download_process_data_local(start_date,
 
         shutil.rmtree(temp_dir_geo)
         shutil.rmtree(path_to_temp_file)
-        shutil.rmtree(f'{temp_file_geo.name}.zip')
+        os.remove(f'{temp_file_geo.name}.zip')
 
 def gdal_transform_tempfile(temp_file_path,
                             out_dir,
