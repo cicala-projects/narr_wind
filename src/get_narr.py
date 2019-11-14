@@ -97,7 +97,7 @@ def requests_to_s3(url, retries=10):
                     logger.info(f'Request GET failed with {file_request.content} [{file_request.url}]')
 
             except requests.exceptions.HTTPError as err:
-                logger.error(f'{err}')
+                logger.error(f'{err} {file_request.content}')
 
 
 def stream_time_range_s3(start_date,
