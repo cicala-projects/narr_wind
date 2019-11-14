@@ -268,7 +268,7 @@ def download_process_data_local(start_date,
         try:
             logger.info(f'Zipping GEOTiffs files and packing to upload [{start_date.strftime("%Y-%m")}]')
             temp_file_geo = NamedTemporaryFile()
-            path_to_zip_file = os.path.join(temp_dir_geo, f'{temp_file_geo.name}.zip')
+            path_to_zip_file = os.path.join(temp_file_geo, f'{temp_file_geo.name}.zip')
             path_geotiffs = Path(temp_dir_geo).rglob('*.tif')
             with zipfile.ZipFile(path_to_zip_file, mode='w',
                                  compression=zipfile.ZIP_DEFLATED,
