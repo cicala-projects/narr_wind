@@ -277,7 +277,7 @@ def download_process_data_local(start_date,
 
             logger.info(f'Finish zipping  - Starting upload to S3 [{start_date.strftime("%Y-%m")}]')
             key = f"processed_geotiff_wind/narr_data_{start_date.strftime('%Y_%m')}.zip"
-            s3.upload_file(path_to_zip_file, aws_bucket_name, key,
+            s3.upload_file(f'{temp_file_geo.name}.zip', aws_bucket_name, key,
                            Config=config)
 
         except Exception as exc:
@@ -285,7 +285,7 @@ def download_process_data_local(start_date,
 
         shutil.rmtree(temp_dir_geo)
         shutil.rmtree(path_to_temp_file)
-        shutil.rmtree(temp_file_geo)
+        shutil.rmtree(f'{temp_file_geo.name}.zip')
 
 def gdal_transform_tempfile(temp_file_path,
                             out_dir,
