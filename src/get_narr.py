@@ -264,7 +264,6 @@ def download_process_data_local(start_date,
                                out_dir=temp_dir_geo,
                                bands=bands,
                                zip_grib=zip_grib)
-        shutil.rmtree(path_to_temp_file)
 
         try:
             logger.info(f'Zipping GEOTiffs files and packing to upload [{start_date.strftime("%Y-%m")}]')
@@ -286,6 +285,7 @@ def download_process_data_local(start_date,
             logger.info(exc)
 
         shutil.rmtree(temp_dir_geo)
+        shutil.rmtree(path_to_temp_file)
 
 
 def gdal_transform_tempfile(temp_file_path,
